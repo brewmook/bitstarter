@@ -22,8 +22,10 @@ References:
 */
 
 var fs = require('fs');
+var util = require('util');
 var program = require('commander');
 var cheerio = require('cheerio');
+var rest = require('restler');
 var HTMLFILE_DEFAULT = "index.html";
 var CHECKSFILE_DEFAULT = "checks.json";
 
@@ -36,6 +38,15 @@ var assertFileExists = function(infile) {
     return instr;
 };
 
+var assertUrlValid = function(url) {
+    if (! /^http:\/\/[-_\.a-zA-Z0-9]+/.test(url))
+    {
+	console.log("%s is not a valid URL. Exiting.", url);
+	process.exit(1);
+    }
+    return url;
+}
+
 var cheerioHtmlFile = function(htmlfile) {
     return cheerio.load(fs.readFileSync(htmlfile));
 };
@@ -44,8 +55,7 @@ var loadChecks = function(checksfile) {
     return JSON.parse(fs.readFileSync(checksfile));
 };
 
-var checkHtmlFile = function(htmlfile, checksfile) {
-    $ = cheerioHtmlFile(htmlfile);
+var checkDOM = function($, checksfile) {
     var checks = loadChecks(checksfile).sort();
     var out = {};
     for(var ii in checks) {
@@ -54,6 +64,20 @@ var checkHtmlFile = function(htmlfile, checksfile) {
     }
     return out;
 };
+
+var checkHtmlFile = function(htmlfile, checksfile) {
+    return checkDOM(cheerioHtmlFile(htmlfile), checksfile);
+}
+
+var checkUrl = function(url, checksfile, callback) {
+    rest.get(url).on('complete', function(result, response) {
+	if (result instanceof Error) {
+	    console.error('Error: ' + util.format(response.message));
+        } else {
+	    callback(checkDOM(cheerio.load(result), checksfile));
+        }
+    });
+}
 
 var clone = function(fn) {
     // Workaround for commander.js issue.
@@ -71,10 +95,23 @@ if(require.main == module) {
 		'Path to index.html',
 		clone(assertFileExists),
 		HTMLFILE_DEFAULT)
+        .option('-u, --url <url>',
+		'Url to index.html',
+		clone(assertUrlValid))
         .parse(process.argv);
-    var checkJson = checkHtmlFile(program.file, program.checks);
-    var outJson = JSON.stringify(checkJson, null, 4);
-    console.log(outJson);
+    var checkJson = '';
+    if (!program.url)
+    {
+	checkJson = checkHtmlFile(program.file, program.checks);
+	console.log(JSON.stringify(checkJson, null, 4));
+    }
+    else
+    {
+	checkUrl(program.url, program.checks, function(json)
+        {
+	    console.log(JSON.stringify(json, null, 4));
+	});
+    }
 } else {
     exports.checkHtmlFile = checkHtmlFile;
 }
